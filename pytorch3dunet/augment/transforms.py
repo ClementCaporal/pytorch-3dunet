@@ -49,6 +49,22 @@ class RandomFlip:
 
         return m
 
+class RandomChannelShuffle:
+    """
+    Randomly shuffle the channels of the image. Image must be 4D (CxDxHxW).
+    """
+
+    def __init__(self, random_state, execution_probability=0.5, **kwargs):
+        assert random_state is not None, 'RandomState cannot be None'
+        self.random_state = random_state
+        self.execution_probability = execution_probability
+
+    def __call__(self, m):
+        assert m.ndim == 4, 'Supports only 4D (CxDxHxW) images'
+        if self.random_state.uniform() < self.execution_probability:
+            np.random.shuffle(m)
+
+        return m
 
 class RandomRotate90:
     """
@@ -131,6 +147,34 @@ class RandomContrast:
             return np.clip(result, -1, 1)
 
         return m
+
+
+class RandomContrastChannelWise:
+    """
+    Adjust contrast by scaling each voxel to `mean + alpha * (v - mean)`.
+    """
+
+    def __init__(self, random_state, alpha=(0.5, 1.5), mean=0.0, axis_prob=0.1, **kwargs):
+        self.random_state = random_state
+        assert len(alpha) == 2
+
+        self.alpha = alpha
+        self.axis_prob = axis_prob
+
+    def __call__(self, m):
+
+        assert m.ndim in [4], 'Supports only 4D (CxDxHxW) images'
+
+        channels = []
+        for c in range(len(m)):
+            channel = m[c]
+            if self.random_state.uniform() < self.axis_prob:
+                c_mean = np.mean(channel)
+                alpha = self.random_state.uniform(self.alpha[0], self.alpha[1])
+                channel = c_mean + alpha * (channel - c_mean)
+            channels.append(channel)
+
+        return np.stack(channels, axis=0)
 
 
 # it's relatively slow, i.e. ~1s per patch of size 64x200x200, so use multiple workers in the DataLoader
@@ -331,6 +375,24 @@ class StandardLabelToBoundary:
             results.append(_recover_ignore_index(foreground, m, self.ignore_index))
 
         results.append(_recover_ignore_index(boundaries, m, self.ignore_index))
+
+        if self.append_label:
+            # append original input data
+            results.append(m)
+
+        return np.stack(results, axis=0)
+
+
+class StandardLabel:
+    def __init__(self, ignore_index=None, append_label=False, **kwargs):
+        self.ignore_index = ignore_index
+        self.append_label = append_label
+
+    def __call__(self, m):
+        assert m.ndim == 3
+
+        results = []
+        results.append(m)
 
         if self.append_label:
             # append original input data
